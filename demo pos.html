@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SheetPOS Pro (Demo Version) - Google Sheets POS & Scanner System</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Html5-QRCode Scanner Library -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <!-- QRCode Generator Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            500: '#10b981',
+                            600: '#059669',
+                            700: '#047857',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        #cameraScanner video { object-fit: cover; border-radius: 0.75rem; width: 100% !important; }
+        @media print {
+            body * { visibility: hidden; }
+            #receiptPrintArea, #receiptPrintArea * { visibility: visible; }
+            #receiptPrintArea { position: absolute; left: 0; top: 0; width: 100%; color: #000; background: #fff; }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans antialiased h-screen flex flex-col overflow-hidden selection:bg-emerald-500 selection:text-white">
+
+    <!-- Top Navigation Bar -->
+    <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center justify-between shrink-0 z-30">
+        <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-emerald-600/30">
+                <i data-lucide="sheet" class="w-5 h-5"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-sm leading-none text-white flex items-center gap-2">
+                    SheetPOS Pro <span class="text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono uppercase font-bold">Demo Version</span>
+                </h1>
+                <p class="text-[11px] text-slate-400 mt-0.5">Mobile & Desktop Universal Web Terminal</p>
+            </div>
+        </div>
+
+        <!-- Connection Badge & Action Buttons -->
+        <div class="flex items-center space-x-2">
+            <!-- Scan Limit Badge -->
+            <div class="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-medium">
+                <i data-lucide="camera" class="w-3.5 h-3.5 text-amber-400"></i>
+                <span class="text-slate-300">Daily Scans: <strong id="scanCountDisplay" class="text-amber-400">0/5</strong></span>
+            </div>
+
+            <button onclick="toggleCameraScanner()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl transition shadow-lg shadow-emerald-600/20 flex items-center gap-1.5">
+                <i data-lucide="camera" class="w-4 h-4"></i> Scan Code
+            </button>
+            <button onclick="openSettingsModal()" class="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 rounded-xl transition" title="Google Sheet & POS Settings">
+                <i data-lucide="settings" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="bg-slate-900/80 border-b border-slate-800 px-4 py-2 flex space-x-2 shrink-0 text-xs font-medium">
+        <button id="tabRegister" onclick="switchTab('register')" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white flex items-center gap-1.5 transition">
+            <i data-lucide="shopping-bag" class="w-3.5 h-3.5"></i> POS Terminal
+        </button>
+        <button id="tabInventory" onclick="switchTab('inventory')" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1.5 transition">
+            <i data-lucide="boxes" class="w-3.5 h-3.5"></i> Inventory Catalog (<span id="inventoryCount">0</span>/10)
+        </button>
+        <button id="tabHistory" onclick="switchTab('history')" class="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1.5 transition">
+            <i data-lucide="receipt" class="w-3.5 h-3.5"></i> Sales Log
+        </button>
+    </nav>
+
+    <!-- Main Workspace Viewport -->
+    <main class="flex-1 flex overflow-hidden relative">
+
+        <!-- SECTION 1: POS REGISTER TERMINAL VIEW -->
+        <div id="viewRegister" class="flex-1 flex flex-col md:flex-row overflow-hidden w-full">
+            
+            <!-- Left: Catalog & Quick Barcode Input -->
+            <section class="flex-1 flex flex-col p-4 space-y-4 overflow-hidden border-r border-slate-800">
+                
+                <!-- Search & Manual Barcode Input -->
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <div class="relative flex-1">
+                        <i data-lucide="search" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+                        <input type="text" id="searchInput" oninput="filterCatalog()" placeholder="Search item name, category or SKU..." 
+                            class="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs focus:outline-none focus:border-emerald-500 transition">
+                    </div>
+                    <div class="relative w-full sm:w-64">
+                        <i data-lucide="barcode" class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-emerald-400"></i>
+                        <input type="text" id="barcodeScannerInput" onkeydown="handleBarcodeKeyPress(event)" placeholder="Scan Barcode / USB Input..." 
+                            class="w-full pl-9 pr-3 py-2 bg-slate-900 border border-emerald-500/50 rounded-xl text-xs focus:outline-none focus:border-emerald-400 transition font-mono">
+                    </div>
+                </div>
+
+                <!-- Product Catalog Grid -->
+                <div id="catalogGrid" class="flex-1 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 overflow-y-auto pr-1">
+                    <!-- Dynamic Product Cards -->
+                </div>
+            </section>
+
+            <!-- Right: Cart & Checkout Panel -->
+            <section class="w-full md:w-96 bg-slate-900/60 border-t md:border-t-0 md:border-l border-slate-800 flex flex-col p-4 shrink-0 justify-between">
+                <div>
+                    <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
+                        <h2 class="font-bold text-xs uppercase tracking-wider text-slate-200 flex items-center gap-2">
+                            <i data-lucide="shopping-cart" class="w-4 h-4 text-emerald-500"></i> Current Checkout
+                        </h2>
+                        <button onclick="clearCart()" class="text-xs text-rose-400 hover:text-rose-300">Clear Cart</button>
+                    </div>
+
+                    <!-- Cart Item List -->
+                    <div id="cartItems" class="max-h-60 md:max-h-[340px] overflow-y-auto space-y-2 pr-1 text-xs">
+                        <div class="text-center py-12 text-slate-500">No items added to sale</div>
+                    </div>
+                </div>
+
+                <!-- Cart Totals & Checkout -->
+                <div class="border-t border-slate-800 pt-3 space-y-3">
+                    <div class="space-y-1 text-xs text-slate-400">
+                        <div class="flex justify-between"><span>Subtotal:</span><span id="cartSubtotal" class="font-mono">$0.00</span></div>
+                        <div class="flex justify-between"><span>Tax Rate (<span id="taxLabel">8%</span>):</span><span id="cartTax" class="font-mono">$0.00</span></div>
+                        <div class="flex justify-between font-bold text-sm text-white pt-1 border-t border-slate-800">
+                            <span>Total Amount:</span><span id="cartTotal" class="text-emerald-400 font-mono">$0.00</span>
+                        </div>
+                    </div>
+
+                    <!-- Payment Mode & Complete Sale -->
+                    <div class="grid grid-cols-2 gap-2">
+                        <select id="paymentMethod" class="px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none">
+                            <option value="Cash">Cash</option>
+                            <option value="Credit Card">Credit Card</option>
+                            <option value="Mobile Payment">Mobile Pay / QR</option>
+                        </select>
+                        <button onclick="processCheckout()" class="py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5">
+                            <i data-lucide="check-circle" class="w-4 h-4"></i> Complete Sale
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- SECTION 2: INVENTORY CATALOG MANAGEMENT VIEW -->
+        <div id="viewInventory" class="hidden flex-1 p-6 overflow-y-auto space-y-4">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                <div>
+                    <h2 class="text-base font-bold text-white flex items-center gap-2">
+                        <i data-lucide="boxes" class="w-5 h-5 text-emerald-400"></i> Stock & Inventory Manager
+                    </h2>
+                    <p class="text-xs text-slate-400">Demo Limit: Maximum 10 products allowed.</p>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button onclick="openAddItemModal()" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl transition flex items-center gap-1.5">
+                        <i data-lucide="plus-circle" class="w-4 h-4"></i> Add New Product
+                    </button>
+                    <button onclick="syncWithGoogleSheets()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 transition flex items-center gap-1.5">
+                        <i data-lucide="refresh-cw" class="w-4 h-4 text-emerald-400"></i> Sync Sheet Now
+                    </button>
+                </div>
+            </div>
+
+            <!-- Inventory Table -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                            <tr>
+                                <th class="p-3.5">SKU / Barcode</th>
+                                <th class="p-3.5">Product Name</th>
+                                <th class="p-3.5">Category</th>
+                                <th class="p-3.5">Price</th>
+                                <th class="p-3.5">Stock Qty</th>
+                                <th class="p-3.5 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventoryTableBody" class="divide-y divide-slate-800/60">
+                            <!-- Injected dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 3: SALES HISTORY VIEW -->
+        <div id="viewHistory" class="hidden flex-1 p-6 overflow-y-auto space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                    <h2 class="text-base font-bold text-white flex items-center gap-2">
+                        <i data-lucide="history" class="w-5 h-5 text-emerald-400"></i> Completed Sales Log
+                    </h2>
+                    <p class="text-xs text-slate-400">Transactions stored locally & dispatched to Google Sheet sales audit log.</p>
+                </div>
+            </div>
+
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                            <tr>
+                                <th class="p-3.5">Receipt #</th>
+                                <th class="p-3.5">Date & Time</th>
+                                <th class="p-3.5">Items</th>
+                                <th class="p-3.5">Payment</th>
+                                <th class="p-3.5">Total Paid</th>
+                                <th class="p-3.5 text-right">Receipt</th>
+                            </tr>
+                        </thead>
+                        <tbody id="salesHistoryTableBody" class="divide-y divide-slate-800/60">
+                            <!-- Injected dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- MODAL: Live Camera Scanner -->
+    <div id="cameraScannerModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 relative">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="font-bold text-slate-100 text-sm flex items-center gap-2">
+                    <i data-lucide="camera" class="w-4 h-4 text-emerald-400"></i> Barcode & QR Camera Scanner
+                </h3>
+                <button onclick="toggleCameraScanner()" class="text-slate-400 hover:text-white p-1 rounded-lg transition">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800 min-h-[250px]">
+                <div id="cameraScanner" class="w-full"></div>
+            </div>
+
+            <p class="text-[11px] text-amber-400 text-center font-medium">Demo Mode: Limited to 5 scans per day.</p>
+        </div>
+    </div>
+
+    <!-- MODAL: Google Sheet Configuration Settings -->
+    <div id="settingsModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 relative">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 class="font-bold text-slate-100 text-sm flex items-center gap-2">
+                    <i data-lucide="sheet" class="w-4 h-4 text-emerald-400"></i> Link Google Sheets Webhook / CSV
+                </h3>
+                <button onclick="closeSettingsModal()" class="text-slate-400 hover:text-white p-1 rounded-lg transition">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="space-y-3 text-xs">
+                <div>
+                    <label class="block text-slate-400 mb-1">Google Apps Script Webhook Endpoint URL:</label>
+                    <input type="text" id="sheetWebhookInput" placeholder="https://script.google.com/macros/s/.../exec" 
+                        class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs focus:outline-none focus:border-emerald-500">
+                </div>
+
+                <div>
+                    <label class="block text-slate-400 mb-1">Tax Rate (%)</label>
+                    <input type="number" id="taxRateInput" value="8" step="0.1" 
+                        class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs focus:outline-none focus:border-emerald-500">
+                </div>
+
+                <div class="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-300 text-[11px] space-y-1.5">
+                    <p class="font-bold">Google Apps Script Setup Steps:</p>
+                    <ol class="list-decimal pl-4 space-y-1">
+                        <li>Open Google Sheets &gt; Extensions &gt; Apps Script.</li>
+                        <li>Paste script to handle inventory GET requests & transaction POST records.</li>
+                        <li>Click <strong>Deploy &gt; New Deployment &gt; Web App</strong>.</li>
+                        <li>Set access to <strong>"Anyone"</strong> and copy the generated Webhook URL above!</li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-2">
+                <button onclick="saveSettings()" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-emerald-600/20">
+                    Save Configuration Settings
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: Add / Edit Item -->
+    <div id="itemModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 relative">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 id="itemModalTitle" class="font-bold text-slate-100 text-sm">Add Product Item</h3>
+                <button onclick="closeItemModal()" class="text-slate-400 hover:text-white p-1 rounded-lg transition">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="space-y-3 text-xs">
+                <div>
+                    <label class="block text-slate-400 mb-1">Barcode / SKU Code *</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="itemBarcodeInput" placeholder="e.g., 10001 or UPC" 
+                            class="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs focus:outline-none focus:border-emerald-500 font-mono">
+                        <button onclick="generateRandomBarcode()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs rounded-xl">Auto</button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-slate-400 mb-1">Product Title / Description *</label>
+                    <input type="text" id="itemNameInput" placeholder="Wireless Bluetooth Mouse" 
+                        class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs focus:outline-none focus:border-emerald-500">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-400 mb-1">Category</label>
+                        <input type="text" id="itemCategoryInput" placeholder="Electronics" 
+                            class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">Price ($) *</label>
+                        <input type="number" id="itemPriceInput" step="0.01" placeholder="29.99" 
+                            class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs focus:outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-slate-400 mb-1">Stock Quantity</label>
+                    <input type="number" id="itemStockInput" value="50" 
+                        class="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs focus:outline-none focus:border-emerald-500">
+                </div>
+            </div>
+
+            <button onclick="saveItem()" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs transition shadow-lg shadow-emerald-600/20">
+                Save Product
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: Printable Receipt View -->
+    <div id="receiptModal" class="fixed inset-0 z-50 hidden bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4 relative">
+            <div id="receiptPrintArea" class="bg-white text-slate-900 p-4 rounded-xl text-xs space-y-3 font-mono">
+                <div class="text-center border-b border-slate-200 pb-2">
+                    <h2 class="font-bold text-sm uppercase">SheetPOS Retail</h2>
+                    <p class="text-[10px] text-slate-500">Universal Google Sheet Connected POS</p>
+                    <p id="receiptDate" class="text-[10px] text-slate-500 mt-1"></p>
+                </div>
+                <div class="text-[10px] flex justify-between">
+                    <span>Receipt #: <strong id="receiptNumber"></strong></span>
+                    <span>Pay: <strong id="receiptPayment"></strong></span>
+                </div>
+                <div id="receiptItemsList" class="border-y border-slate-200 py-2 space-y-1">
+                    <!-- Dynamic receipt items -->
+                </div>
+                <div class="space-y-0.5 text-right font-bold text-xs">
+                    <div class="flex justify-between"><span>Subtotal:</span><span id="receiptSubtotal"></span></div>
+                    <div class="flex justify-between"><span>Tax:</span><span id="receiptTax font-normal"></span></div>
+                    <div class="flex justify-between text-sm pt-1 border-t border-slate-200"><span>TOTAL:</span><span id="receiptTotal"></span></div>
+                </div>
+                <div class="text-center text-[10px] text-slate-500 pt-2 border-t border-slate-200">
+                    Thank you for your business!
+                </div>
+            </div>
+
+            <div class="flex gap-2">
+                <button onclick="window.print()" class="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs transition">
+                    Print Receipt
+                </button>
+                <button onclick="closeReceiptModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs transition">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Script -->
+    <script>
+        // Core Limits Configuration
+        const MAX_INVENTORY_ITEMS = 10;
+        const MAX_DAILY_SCANS = 5;
+
+        // Core State
+        let inventory = JSON.parse(localStorage.getItem('sheetpos_inventory') || '[]');
+        let salesLog = JSON.parse(localStorage.getItem('sheetpos_sales') || '[]');
+        let cart = [];
+        let html5QrScanner = null;
+        let config = JSON.parse(localStorage.getItem('sheetpos_config') || '{"webhookUrl":"","taxRate":8}');
+        let editingBarcode = null;
+
+        // Daily Scan Tracker
+        function getDailyScanData() {
+            const today = new Date().toISOString().split('T')[0];
+            const data = JSON.parse(localStorage.getItem('sheetpos_scan_data') || '{}');
+            if (data.date !== today) {
+                return { date: today, count: 0 };
+            }
+            return data;
+        }
+
+        function updateScanCountUI() {
+            const scanData = getDailyScanData();
+            const display = document.getElementById('scanCountDisplay');
+            if (display) {
+                display.innerText = `${scanData.count}/${MAX_DAILY_SCANS}`;
+            }
+        }
+
+        function incrementScanCount() {
+            const scanData = getDailyScanData();
+            scanData.count += 1;
+            localStorage.setItem('sheetpos_scan_data', JSON.stringify(scanData));
+            updateScanCountUI();
+        }
+
+        // Default Sample Products if Inventory Empty
+        if (inventory.length === 0) {
+            inventory = [
+                { barcode: "10001", name: "Wireless Keyboard", category: "Hardware", price: 49.99, stock: 25 },
+                { barcode: "10002", name: "Optical Gaming Mouse", category: "Hardware", price: 29.50, stock: 40 },
+                { barcode: "10003", name: "Thermal Receipt Roll", category: "Supplies", price: 12.00, stock: 100 },
+                { barcode: "10004", name: "USB Barcode Reader", category: "Hardware", price: 35.00, stock: 15 }
+            ];
+            saveInventoryLocal();
+        }
+
+        // Initialize App
+        window.addEventListener('DOMContentLoaded', () => {
+            renderCatalog(inventory);
+            renderInventoryTable();
+            renderSalesHistory();
+            updateTaxLabel();
+            updateScanCountUI();
+            lucide.createIcons();
+
+            // Focus Barcode Input automatically for hardware scanners
+            document.getElementById('barcodeScannerInput').focus();
+        });
+
+        // Tab Switcher
+        function switchTab(tab) {
+            ['Register', 'Inventory', 'History'].forEach(t => {
+                const view = document.getElementById(`view${t}`);
+                const btn = document.getElementById(`tab${t}`);
+                if (t.toLowerCase() === tab) {
+                    view.classList.remove('hidden');
+                    btn.className = "px-3 py-1.5 rounded-lg bg-emerald-600 text-white flex items-center gap-1.5 transition";
+                } else {
+                    view.classList.add('hidden');
+                    btn.className = "px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white flex items-center gap-1.5 transition";
+                }
+            });
+        }
+
+        // Save Inventory Local Storage
+        function saveInventoryLocal() {
+            localStorage.setItem('sheetpos_inventory', JSON.stringify(inventory));
+            document.getElementById('inventoryCount').innerText = inventory.length;
+            renderCatalog(inventory);
+            renderInventoryTable();
+        }
+
+        // Render Product Catalog Cards
+        function renderCatalog(list) {
+            const grid = document.getElementById('catalogGrid');
+            if (list.length === 0) {
+                grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-500 text-xs">No products matched query.</div>`;
+                return;
+            }
+
+            grid.innerHTML = list.map(item => `
+                <div onclick="addToCart('${item.barcode}')" class="p-3 bg-slate-900 border border-slate-800 rounded-xl hover:border-emerald-500/50 cursor-pointer transition flex flex-col justify-between group shadow-sm">
+                    <div>
+                        <div class="flex items-center justify-between text-[10px] text-slate-500">
+                            <span class="font-mono">${item.barcode}</span>
+                            <span>${item.category}</span>
+                        </div>
+                        <h3 class="font-semibold text-xs text-slate-200 mt-1 line-clamp-2 group-hover:text-emerald-400 transition">${item.name}</h3>
+                    </div>
+                    <div class="flex items-center justify-between mt-3 pt-2 border-t border-slate-800/80">
+                        <span class="text-xs font-bold text-emerald-400 font-mono">$${parseFloat(item.price).toFixed(2)}</span>
+                        <span class="text-[10px] ${item.stock > 5 ? 'text-slate-400' : 'text-rose-400 font-bold'}">Stock: ${item.stock}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Filter Catalog Search
+        function filterCatalog() {
+            const query = document.getElementById('searchInput').value.toLowerCase().trim();
+            const filtered = inventory.filter(i => 
+                i.name.toLowerCase().includes(query) || 
+                i.barcode.toLowerCase().includes(query) || 
+                i.category.toLowerCase().includes(query)
+            );
+            renderCatalog(filtered);
+        }
+
+        // Handle External Barcode Scanner Input
+        function handleBarcodeKeyPress(e) {
+            if (e.key === 'Enter') {
+                const code = e.target.value.trim();
+                if (code) {
+                    addToCart(code);
+                    e.target.value = '';
+                }
+            }
+        }
+
+        // Add Product to Cart
+        function addToCart(barcode) {
+            const product = inventory.find(i => i.barcode === barcode);
+            if (!product) {
+                alert(`Product code "${barcode}" not found in inventory catalog.`);
+                return;
+            }
+
+            if (product.stock <= 0) {
+                alert(`Item "${product.name}" is currently out of stock!`);
+                return;
+            }
+
+            const existing = cart.find(c => c.barcode === barcode);
+            if (existing) {
+                if (existing.qty + 1 > product.stock) {
+                    alert("Stock limit reached!");
+                    return;
+                }
+                existing.qty += 1;
+            } else {
+                cart.push({ ...product, qty: 1 });
+            }
+
+            renderCart();
+        }
+
+        // Render Cart UI
+        function renderCart() {
+            const container = document.getElementById('cartItems');
+            if (cart.length === 0) {
+                container.innerHTML = `<div class="text-center py-12 text-slate-500">No items added to sale</div>`;
+                updateCartTotals(0);
+                return;
+            }
+
+            container.innerHTML = cart.map(item => `
+                <div class="flex items-center justify-between p-2.5 bg-slate-950 border border-slate-800 rounded-xl">
+                    <div class="flex-1 pr-2">
+                        <div class="font-medium text-slate-200 line-clamp-1">${item.name}</div>
+                        <div class="text-[10px] text-slate-400 font-mono">$${parseFloat(item.price).toFixed(2)} x ${item.qty}</div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span class="font-bold text-emerald-400 font-mono">$${(item.price * item.qty).toFixed(2)}</span>
+                        <button onclick="removeFromCart('${item.barcode}')" class="text-rose-400 hover:text-rose-300 p-1">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+            updateCartTotals(subtotal);
+            lucide.createIcons();
+        }
+
+        function removeFromCart(barcode) {
+            cart = cart.filter(c => c.barcode !== barcode);
+            renderCart();
+        }
+
+        function clearCart() {
+            cart = [];
+            renderCart();
+        }
+
+        function updateCartTotals(subtotal) {
+            const taxRate = parseFloat(config.taxRate || 8) / 100;
+            const tax = subtotal * taxRate;
+            const total = subtotal + tax;
+
+            document.getElementById('cartSubtotal').innerText = `$${subtotal.toFixed(2)}`;
+            document.getElementById('cartTax').innerText = `$${tax.toFixed(2)}`;
+            document.getElementById('cartTotal').innerText = `$${total.toFixed(2)}`;
+        }
+
+        // Complete Checkout & Record Transaction
+        function processCheckout() {
+            if (cart.length === 0) {
+                alert("Cart is empty! Add items before completing sale.");
+                return;
+            }
+
+            const payment = document.getElementById('paymentMethod').value;
+            const subtotal = cart.reduce((sum, item) => sum + (item.price * item.qty), 0);
+            const tax = subtotal * (parseFloat(config.taxRate || 8) / 100);
+            const total = subtotal + tax;
+            const receiptId = 'REC-' + Math.floor(100000 + Math.random() * 900000);
+            const timestamp = new Date().toLocaleString();
+
+            // Deduct Stock
+            cart.forEach(cartItem => {
+                const invItem = inventory.find(i => i.barcode === cartItem.barcode);
+                if (invItem) invItem.stock -= cartItem.qty;
+            });
+
+            // Record Sale
+            const saleRecord = {
+                receiptId,
+                date: timestamp,
+                items: cart.map(i => `${i.name} (x${i.qty})`).join(', '),
+                payment,
+                subtotal: subtotal.toFixed(2),
+                tax: tax.toFixed(2),
+                total: total.toFixed(2)
+            };
+
+            salesLog.unshift(saleRecord);
+            localStorage.setItem('sheetpos_sales', JSON.stringify(salesLog));
+            saveInventoryLocal();
+
+            // Sync with Google Sheet if Webhook configured
+            if (config.webhookUrl) {
+                postSaleToGoogleSheet(saleRecord);
+            }
+
+            // Display Receipt
+            showReceipt(saleRecord, [...cart]);
+            clearCart();
+            renderSalesHistory();
+        }
+
+        // Printable Receipt Display
+        function showReceipt(sale, cartCopy) {
+            document.getElementById('receiptNumber').innerText = sale.receiptId;
+            document.getElementById('receiptDate').innerText = sale.date;
+            document.getElementById('receiptPayment').innerText = sale.payment;
+
+            document.getElementById('receiptItemsList').innerHTML = cartCopy.map(i => `
+                <div class="flex justify-between">
+                    <span>${i.name} x${i.qty}</span>
+                    <span>$${(i.price * i.qty).toFixed(2)}</span>
+                </div>
+            `).join('');
+
+            document.getElementById('receiptSubtotal').innerText = `$${sale.subtotal}`;
+            document.getElementById('receiptTax').innerText = `$${sale.tax}`;
+            document.getElementById('receiptTotal').innerText = `$${sale.total}`;
+
+            document.getElementById('receiptModal').classList.remove('hidden');
+        }
+
+        function closeReceiptModal() {
+            document.getElementById('receiptModal').classList.add('hidden');
+        }
+
+        // Camera QR / Barcode Scanner Controls with Daily Limit Check
+        function toggleCameraScanner() {
+            const modal = document.getElementById('cameraScannerModal');
+            if (modal.classList.contains('hidden')) {
+                const scanData = getDailyScanData();
+                if (scanData.count >= MAX_DAILY_SCANS) {
+                    alert("Demo Limit Reached: You have used all 5 camera scans for today. Upgrade to full version for unlimited scans.");
+                    return;
+                }
+                modal.classList.remove('hidden');
+                startCameraScanner();
+            } else {
+                modal.classList.add('hidden');
+                stopCameraScanner();
+            }
+        }
+
+        function startCameraScanner() {
+            html5QrScanner = new Html5Qrcode("cameraScanner");
+            html5QrScanner.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: { width: 220, height: 220 } },
+                (decodedText) => {
+                    incrementScanCount();
+                    addToCart(decodedText);
+                    toggleCameraScanner();
+                },
+                (err) => {}
+            ).catch(err => console.error(err));
+        }
+
+        function stopCameraScanner() {
+            if (html5QrScanner) {
+                html5QrScanner.stop().then(() => html5QrScanner.clear()).catch(err => console.error(err));
+            }
+        }
+
+        // Inventory Table View
+        function renderInventoryTable() {
+            const tbody = document.getElementById('inventoryTableBody');
+            tbody.innerHTML = inventory.map(item => `
+                <tr class="hover:bg-slate-800/40 transition">
+                    <td class="p-3.5 font-mono text-emerald-400 font-bold">${item.barcode}</td>
+                    <td class="p-3.5 font-semibold text-white">${item.name}</td>
+                    <td class="p-3.5 text-slate-400">${item.category}</td>
+                    <td class="p-3.5 font-mono text-emerald-400">$${parseFloat(item.price).toFixed(2)}</td>
+                    <td class="p-3.5"><span class="px-2 py-0.5 rounded-full ${item.stock > 5 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'}">${item.stock} in stock</span></td>
+                    <td class="p-3.5 text-right space-x-2">
+                        <button onclick="editItem('${item.barcode}')" class="text-slate-400 hover:text-white p-1">
+                            <i data-lucide="edit" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button onclick="deleteItem('${item.barcode}')" class="text-rose-400 hover:text-rose-300 p-1">
+                            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        // Add / Edit Modal Controls with Item Limit Check
+        function openAddItemModal() {
+            if (inventory.length >= MAX_INVENTORY_ITEMS) {
+                alert(`Demo Limit Reached: You can only store up to ${MAX_INVENTORY_ITEMS} products in the demo version.`);
+                return;
+            }
+            editingBarcode = null;
+            document.getElementById('itemModalTitle').innerText = "Add New Product";
+            document.getElementById('itemBarcodeInput').value = "";
+            document.getElementById('itemNameInput').value = "";
+            document.getElementById('itemCategoryInput').value = "General";
+            document.getElementById('itemPriceInput').value = "";
+            document.getElementById('itemStockInput').value = "50";
+            document.getElementById('itemModal').classList.remove('hidden');
+        }
+
+        function editItem(barcode) {
+            const item = inventory.find(i => i.barcode === barcode);
+            if (!item) return;
+            editingBarcode = barcode;
+            document.getElementById('itemModalTitle').innerText = "Edit Product Item";
+            document.getElementById('itemBarcodeInput').value = item.barcode;
+            document.getElementById('itemNameInput').value = item.name;
+            document.getElementById('itemCategoryInput').value = item.category;
+            document.getElementById('itemPriceInput').value = item.price;
+            document.getElementById('itemStockInput').value = item.stock;
+            document.getElementById('itemModal').classList.remove('hidden');
+        }
+
+        function closeItemModal() {
+            document.getElementById('itemModal').classList.add('hidden');
+        }
+
+        function saveItem() {
+            const barcode = document.getElementById('itemBarcodeInput').value.trim();
+            const name = document.getElementById('itemNameInput').value.trim();
+            const category = document.getElementById('itemCategoryInput').value.trim() || 'General';
+            const price = parseFloat(document.getElementById('itemPriceInput').value);
+            const stock = parseInt(document.getElementById('itemStockInput').value, 10);
+
+            if (!barcode || !name || isNaN(price)) {
+                alert("Please fill in all mandatory fields (Barcode, Title, Price)");
+                return;
+            }
+
+            if (editingBarcode) {
+                const idx = inventory.findIndex(i => i.barcode === editingBarcode);
+                if (idx !== -1) inventory[idx] = { barcode, name, category, price, stock };
+            } else {
+                if (inventory.length >= MAX_INVENTORY_ITEMS) {
+                    alert(`Demo Limit Reached: Maximum ${MAX_INVENTORY_ITEMS} products allowed.`);
+                    return;
+                }
+                inventory.push({ barcode, name, category, price, stock });
+            }
+
+            saveInventoryLocal();
+            closeItemModal();
+        }
+
+        function deleteItem(barcode) {
+            if (confirm(`Are you sure you want to delete item barcode "${barcode}"?`)) {
+                inventory = inventory.filter(i => i.barcode !== barcode);
+                saveInventoryLocal();
+            }
+        }
+
+        function generateRandomBarcode() {
+            document.getElementById('itemBarcodeInput').value = Math.floor(100000 + Math.random() * 900000).toString();
+        }
+
+        // Sales Log Table View
+        function renderSalesHistory() {
+            const tbody = document.getElementById('salesHistoryTableBody');
+            if (salesLog.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="p-6 text-center text-slate-500">No completed sales recorded yet.</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = salesLog.map(s => `
+                <tr class="hover:bg-slate-800/40 transition">
+                    <td class="p-3.5 font-mono text-emerald-400 font-bold">${s.receiptId}</td>
+                    <td class="p-3.5 text-slate-400">${s.date}</td>
+                    <td class="p-3.5 text-slate-200 line-clamp-1 max-w-xs">${s.items}</td>
+                    <td class="p-3.5"><span class="px-2 py-0.5 bg-slate-800 rounded text-[10px] text-slate-300">${s.payment}</span></td>
+                    <td class="p-3.5 font-mono font-bold text-emerald-400">$${s.total}</td>
+                    <td class="p-3.5 text-right">
+                        <button onclick='reprintReceipt(${JSON.stringify(s)})' class="text-slate-400 hover:text-white p-1">
+                            <i data-lucide="printer" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+            lucide.createIcons();
+        }
+
+        function reprintReceipt(sale) {
+            document.getElementById('receiptNumber').innerText = sale.receiptId;
+            document.getElementById('receiptDate').innerText = sale.date;
+            document.getElementById('receiptPayment').innerText = sale.payment;
+            document.getElementById('receiptItemsList').innerHTML = `<div class="text-slate-600">${sale.items}</div>`;
+            document.getElementById('receiptSubtotal').innerText = `$${sale.subtotal}`;
+            document.getElementById('receiptTax').innerText = `$${sale.tax}`;
+            document.getElementById('receiptTotal').innerText = `$${sale.total}`;
+            document.getElementById('receiptModal').classList.remove('hidden');
+        }
+
+        // Settings Modal & Google Sheets Webhook Configuration
+        function openSettingsModal() {
+            document.getElementById('sheetWebhookInput').value = config.webhookUrl || '';
+            document.getElementById('taxRateInput').value = config.taxRate || 8;
+            document.getElementById('settingsModal').classList.remove('hidden');
+        }
+
+        function closeSettingsModal() {
+            document.getElementById('settingsModal').classList.add('hidden');
+        }
+
+        function saveSettings() {
+            config.webhookUrl = document.getElementById('sheetWebhookInput').value.trim();
+            config.taxRate = parseFloat(document.getElementById('taxRateInput').value) || 8;
+            localStorage.setItem('sheetpos_config', JSON.stringify(config));
+            updateTaxLabel();
+            closeSettingsModal();
+            alert("Configuration saved successfully!");
+        }
+
+        function updateTaxLabel() {
+            document.getElementById('taxLabel').innerText = `${config.taxRate || 8}%`;
+        }
+
+        // Post Transaction Data to Google Sheets Webhook
+        function postSaleToGoogleSheet(sale) {
+            if (!config.webhookUrl) return;
+
+            fetch(config.webhookUrl, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(sale)
+            }).then(() => console.log('Successfully posted sale to Google Sheet'))
+            .catch(err => console.error('Sheet post error:', err));
+        }
+
+        // Fetch & Sync Inventory directly from Google Sheet with Limit Check
+        function syncWithGoogleSheets() {
+            if (!config.webhookUrl) {
+                alert("Please configure your Google Sheet Apps Script Webhook URL in Settings first!");
+                openSettingsModal();
+                return;
+            }
+
+            fetch(config.webhookUrl)
+                .then(res => res.json())
+                .then(data => {
+                    if (Array.isArray(data)) {
+                        if (data.length > MAX_INVENTORY_ITEMS) {
+                            alert(`Synced catalog contains ${data.length} items. Demo mode is truncated to the first ${MAX_INVENTORY_ITEMS} items.`);
+                            inventory = data.slice(0, MAX_INVENTORY_ITEMS);
+                        } else {
+                            inventory = data;
+                        }
+                        saveInventoryLocal();
+                        alert("Successfully synced inventory catalog from Google Sheet!");
+                    }
+                })
+                .catch(err => {
+                    alert("Sync failed or CORS restriction encountered. Verify Apps Script is deployed to 'Anyone'.");
+                });
+        }
+    </script>
+</body>
+</html>
